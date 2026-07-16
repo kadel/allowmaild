@@ -1,0 +1,10 @@
+# Local working config and secrets — never commit.
+config.local.yaml
+config.yaml
+smtp_password
+secrets/
+
+# Local runtime/build artifacts.
+state_dir/
+result
+allowmaild

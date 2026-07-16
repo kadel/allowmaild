@@ -1,0 +1,128 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@v16
+
+      # The flake reads VERSION and stamps it into the binary via ldflags.
+      # Tag builds get the tag's version; main builds get <version>+<sha>.
+      # VERSION is a tracked file, so the (dirty) flake eval picks it up.
+      - name: Stamp version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "${GITHUB_REF_NAME#v}" > VERSION
+          else
+            echo "$(tr -d '[:space:]' < VERSION)+${GITHUB_SHA::7}" > VERSION
+          fi
+          cat VERSION
+
+      # buildGoModule runs the Go test suite as part of the build.
+      - name: Build with nix
+        run: nix build .#allowmaild
+
+      - name: Check stamped version
+        run: ./result/bin/allowmaild -version
+
+      - name: Stage binary
+        run: install -m 0755 result/bin/allowmaild allowmaild-linux-${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: allowmaild-linux-${{ matrix.arch }}
+          path: allowmaild-linux-${{ matrix.arch }}
+          if-no-files-found: error
+
+  # Rolling "latest" prerelease tracking main.
+  latest:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    concurrency:
+      group: latest-release
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && sha256sum allowmaild-* > SHA256SUMS
+
+      - name: Recreate "latest" release
+        run: |
+          gh release delete latest -R "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create latest -R "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "latest (main)" \
+            --notes "Rolling build of \`main\` at ${GITHUB_SHA}." \
+            dist/*
+
+  # Versioned release for pushed tags (v*).
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && sha256sum allowmaild-* > SHA256SUMS
+
+      - name: Create release
+        run: |
+          gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            dist/*
+
+  # Keep the repo's VERSION file in sync with the released tag.
+  bump-version:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Commit VERSION from tag
+        run: |
+          echo "${GITHUB_REF_NAME#v}" > VERSION
+          if git diff --quiet -- VERSION; then
+            echo "VERSION already matches ${GITHUB_REF_NAME#v}"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore: bump VERSION to ${GITHUB_REF_NAME#v}"
+          git pull --rebase origin main
+          git push origin main

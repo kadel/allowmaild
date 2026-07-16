@@ -1,0 +1,41 @@
+# allowmaild configuration. Copy to config.yaml and keep it readable by the
+# allowmaild daemon only — the calling agent must never be able to read or
+# write it: root:allowmail 0640 at /etc/allowmaild/config.yaml.
+
+sender:
+  address: sender@example.com
+  name: Your Name
+
+# Recipient aliases. The API accepts only these names, matched exactly and
+# case-sensitively. Adding an alias here is the human approval step.
+recipients:
+  self-gmail:
+    address: you@example.com
+    # Optional per-recipient limits:
+    # limits:
+    #   per_hour: 2
+    #   per_day: 10
+
+limits:
+  per_hour: 5
+  per_day: 20
+  max_subject_bytes: 200   # optional, default 200 (hard cap 256)
+  max_body_bytes: 10000    # optional, default 10000
+
+smtp:
+  host: smtp.example.com
+  port: 465
+  tls_mode: implicit       # "implicit" (:465) or "starttls" (:587)
+  auth: plain              # "plain" or "login"
+  username: sender@example.com
+  # Delivered by systemd LoadCredential; the source file stays root-only.
+  password_file: /run/credentials/allowmaild.service/smtp_password
+  timeout_seconds: 60      # optional, whole-attempt deadline
+  io_timeout_seconds: 20   # optional, per read/write deadline
+
+socket_path: /run/allowmail/allowmail.sock
+# "0666" — the 0750 socket directory (group allowmail-sock) is the access
+# gate, not the socket file itself.
+socket_mode: "0666"
+state_dir: /var/lib/allowmaild
+retention_days: 90         # optional, default 90
