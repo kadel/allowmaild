@@ -7,4 +7,4 @@ secrets/
 # Local runtime/build artifacts.
 state_dir/
 result
-allowmaild
+/allowmaild
