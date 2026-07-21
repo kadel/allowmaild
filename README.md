@@ -52,3 +52,6 @@ the permission model, and post-install verification live in
 
 Configuration reference: [`config.example.yaml`](config.example.yaml).
 Specs for every behavior live under [`openspec/specs/`](openspec/specs/).
+
+An [Agent Skill](https://agentskills.io) teaching AI agents to send email
+through the daemon lives in [`skills/allowmail-send/`](skills/allowmail-send/).
