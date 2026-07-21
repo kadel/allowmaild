@@ -43,6 +43,9 @@ type Sender struct {
 type Recipient struct {
 	Address string           `yaml:"address"`
 	Limits  *RecipientLimits `yaml:"limits"`
+	// RequireApproval gates sends to this recipient behind a per-message
+	// approval assertion on the send request.
+	RequireApproval bool `yaml:"require_approval"`
 }
 
 type RecipientLimits struct {

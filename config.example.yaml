@@ -15,6 +15,10 @@ recipients:
     # limits:
     #   per_hour: 2
     #   per_day: 10
+    # Optional, default false. When true, every send to this alias must carry
+    # "approved": true (set by the OpenClaw plugin after the user confirms the
+    # message); requests without it are rejected with approval_required.
+    # require_approval: true
 
 limits:
   per_hour: 5

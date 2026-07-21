@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS requests (
 	created_at   INTEGER NOT NULL,
 	updated_at   INTEGER NOT NULL,
 	result_code  TEXT NOT NULL DEFAULT '',
-	message_id   TEXT NOT NULL DEFAULT ''
+	message_id   TEXT NOT NULL DEFAULT '',
+	approved     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_requests_created_at ON requests (created_at);
 CREATE INDEX IF NOT EXISTS idx_requests_alias_created_at ON requests (alias, created_at);
@@ -56,6 +57,8 @@ type Row struct {
 	UpdatedAt   time.Time
 	ResultCode  string
 	MessageID   string
+	// Approved records whether the request asserted human approval.
+	Approved bool
 }
 
 // Open opens (creating if needed) the database at path and runs migrations.
@@ -72,7 +75,30 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
+}
+
+// migrate brings databases created by older schema versions up to date.
+// Pre-approval databases lack the approved column; the default marks their
+// rows as unasserted.
+func migrate(db *sql.DB) error {
+	var n int
+	err := db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('requests') WHERE name = 'approved'`).Scan(&n)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		if _, err := db.Exec(
+			`ALTER TABLE requests ADD COLUMN approved INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -100,6 +126,9 @@ type ReserveParams struct {
 	BodyHash    string
 	Now         time.Time
 	Limits      RateLimits
+	// Approved is the request's approval assertion, persisted for audit.
+	// It does not participate in duplicate/content matching.
+	Approved bool
 }
 
 // ReserveKind classifies the outcome of Reserve.
@@ -157,9 +186,9 @@ func (s *Store) Reserve(ctx context.Context, p ReserveParams) (ReserveResult, er
 
 	now := p.Now.Unix()
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO requests (key, request_id, alias, subject_hash, body_hash, state, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.Key, p.RequestID, p.Alias, p.SubjectHash, p.BodyHash, StateSending, now, now)
+		`INSERT INTO requests (key, request_id, alias, subject_hash, body_hash, state, created_at, updated_at, approved)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.Key, p.RequestID, p.Alias, p.SubjectHash, p.BodyHash, StateSending, now, now, p.Approved)
 	if err != nil {
 		return ReserveResult{}, err
 	}
@@ -258,10 +287,10 @@ func getRow(ctx context.Context, q querier, key string) (*Row, error) {
 	var r Row
 	var created, updated int64
 	err := q.QueryRowContext(ctx,
-		`SELECT key, request_id, alias, subject_hash, body_hash, state, created_at, updated_at, result_code, message_id
+		`SELECT key, request_id, alias, subject_hash, body_hash, state, created_at, updated_at, result_code, message_id, approved
 		 FROM requests WHERE key = ?`, key).
 		Scan(&r.Key, &r.RequestID, &r.Alias, &r.SubjectHash, &r.BodyHash, &r.State,
-			&created, &updated, &r.ResultCode, &r.MessageID)
+			&created, &updated, &r.ResultCode, &r.MessageID, &r.Approved)
 	if err != nil {
 		return nil, err
 	}
