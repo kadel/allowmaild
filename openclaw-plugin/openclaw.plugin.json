@@ -1,0 +1,25 @@
+{
+  "id": "allowmail",
+  "name": "AllowMail",
+  "description": "Send email through the allowmaild daemon, with per-recipient approval gating.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "socketPath": {
+        "type": "string",
+        "description": "Path to the allowmaild Unix socket.",
+        "default": "/run/allowmail/allowmail.sock"
+      }
+    }
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "send_email"
+    ]
+  }
+}

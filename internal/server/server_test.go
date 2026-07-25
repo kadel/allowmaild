@@ -407,6 +407,158 @@ func TestHealthOK(t *testing.T) {
 	}
 }
 
+func flaggedConfig() *config.Config {
+	cfg := testConfig()
+	cfg.Recipients["dad"] = config.Recipient{Address: "dad@example.test", RequireApproval: true}
+	return cfg
+}
+
+func dadBody(key string, approved bool) string {
+	return fmt.Sprintf(`{"recipient":"dad","subject":"Hello","text":"A body line\n","idempotency_key":%q,"approved":%t}`, key, approved)
+}
+
+func TestUnassertedSendToFlaggedRecipientRejected(t *testing.T) {
+	stub := sentStub()
+	h, st, _ := newTestServer(t, flaggedConfig(), stub)
+
+	// Both an omitted and an explicit false approved field are rejected.
+	omitted := `{"recipient":"dad","subject":"Hello","text":"A body line\n","idempotency_key":"k"}`
+	for _, body := range []string{omitted, dadBody("k", false)} {
+		w := post(t, h, body)
+		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "approval_required") {
+			t.Fatalf("body %s: status=%d body=%s", body, w.Code, w.Body.String())
+		}
+	}
+	if stub.count() != 0 {
+		t.Fatal("SMTP attempt happened for unapproved request")
+	}
+	if _, err := st.Get(t.Context(), "k"); err == nil {
+		t.Fatal("rejected request left a reservation")
+	}
+
+	// The rejection consumed nothing: the same key works once approved.
+	if w := post(t, h, dadBody("k", true)); w.Code != http.StatusOK {
+		t.Fatalf("approved request with same key rejected: %d %s", w.Code, w.Body.String())
+	}
+	if stub.count() != 1 {
+		t.Fatalf("send calls = %d, want 1", stub.count())
+	}
+}
+
+func TestApprovedFlagOnUnflaggedRecipientHarmless(t *testing.T) {
+	stub := sentStub()
+	h, _, _ := newTestServer(t, flaggedConfig(), stub)
+
+	body := `{"recipient":"self-gmail","subject":"Hello","text":"A body line\n","idempotency_key":"k","approved":true}`
+	if w := post(t, h, body); w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	// And an unflagged recipient still needs no assertion.
+	if w := post(t, h, validBody("k2")); w.Code != http.StatusOK {
+		t.Fatalf("unasserted send to unflagged alias: %d", w.Code)
+	}
+}
+
+func TestFlaggedReplayRequiresAssertion(t *testing.T) {
+	stub := sentStub()
+	h, _, _ := newTestServer(t, flaggedConfig(), stub)
+
+	first := post(t, h, dadBody("k", true))
+	if first.Code != http.StatusOK {
+		t.Fatalf("first send: %d %s", first.Code, first.Body.String())
+	}
+
+	// Replay with the assertion returns the stored result verbatim.
+	second := post(t, h, dadBody("k", true))
+	if second.Code != http.StatusOK || !bytes.Equal(first.Body.Bytes(), second.Body.Bytes()) {
+		t.Fatalf("replay differs: %d\n%s\n%s", second.Code, first.Body.String(), second.Body.String())
+	}
+	if stub.count() != 1 {
+		t.Fatalf("send calls = %d, want 1", stub.count())
+	}
+
+	// Replay without it is rejected before the store is consulted.
+	w := post(t, h, dadBody("k", false))
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "approval_required") {
+		t.Fatalf("unasserted replay: status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestApprovalAssertionAudited(t *testing.T) {
+	stub := sentStub()
+	h, st, _ := newTestServer(t, flaggedConfig(), stub)
+
+	post(t, h, dadBody("approved-key", true))
+	post(t, h, validBody("plain-key"))
+
+	row, err := st.Get(t.Context(), "approved-key")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !row.Approved {
+		t.Fatal("approved request not audited as approval-asserted")
+	}
+	row, err = st.Get(t.Context(), "plain-key")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if row.Approved {
+		t.Fatal("unasserted request audited as approval-asserted")
+	}
+}
+
+func getRecipients(t *testing.T, h http.Handler) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest("GET", "/v1/recipients", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	return w
+}
+
+func TestRecipientsListsAliasesAndFlags(t *testing.T) {
+	h, _, _ := newTestServer(t, flaggedConfig(), sentStub())
+
+	w := getRecipients(t, h)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp struct {
+		Recipients []struct {
+			Alias            string `json:"alias"`
+			RequiresApproval bool   `json:"requires_approval"`
+		} `json:"recipients"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := []struct {
+		alias    string
+		approval bool
+	}{{"dad", true}, {"self-gmail", false}, {"work", false}}
+	if len(resp.Recipients) != len(want) {
+		t.Fatalf("recipients = %+v", resp.Recipients)
+	}
+	for i, w := range want {
+		if resp.Recipients[i].Alias != w.alias || resp.Recipients[i].RequiresApproval != w.approval {
+			t.Errorf("recipients[%d] = %+v, want %+v", i, resp.Recipients[i], w)
+		}
+	}
+	if strings.Contains(w.Body.String(), "@") {
+		t.Fatalf("recipients response leaks an address: %s", w.Body.String())
+	}
+}
+
+func TestRecipientsEmptyConfig(t *testing.T) {
+	cfg := testConfig()
+	cfg.Recipients = map[string]config.Recipient{}
+	h, _, _ := newTestServer(t, cfg, sentStub())
+
+	w := getRecipients(t, h)
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"recipients":[]}` {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestAuditRecordsForAllTerminalStates(t *testing.T) {
 	outcomes := map[string]smtpclient.Result{
 		"sent":      {Outcome: smtpclient.OutcomeSent, Code: "250"},
