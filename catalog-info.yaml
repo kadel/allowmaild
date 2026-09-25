@@ -1,0 +1,115 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: allowmaild
+  title: allowmaild
+  description: Email-sending daemon that can only deliver to an allowlisted set of recipients
+  annotations:
+    github.com/project-slug: kadel/allowmaild
+    backstage.io/source-location: url:https://github.com/kadel/allowmaild
+    backstage.io/techdocs-ref: dir:.
+  links:
+    - url: https://github.com/kadel/allowmaild
+      title: GitHub Repository
+    - url: https://github.com/kadel/allowmaild/blob/main/deploy/systemd/README.md
+      title: systemd deployment guide
+  tags:
+    - go
+    - smtp
+    - email
+    - systemd
+    - daemon
+    - sqlite
+spec:
+  type: service
+  lifecycle: production
+  owner: user:default/kadel
+  system: homelab
+  providesApis:
+    - allowmaild-api
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: allowmaild-api
+  title: allowmaild API
+  description: Unix-socket-only HTTP API for sending allowlisted email
+  links:
+    - url: https://github.com/kadel/allowmaild/blob/main/openspec/specs/send-api/spec.md
+      title: send-api spec
+  tags:
+    - email
+    - unix-socket
+spec:
+  type: openapi
+  lifecycle: production
+  owner: user:default/kadel
+  system: homelab
+  definition: |
+    openapi: 3.0.0
+    info:
+      title: allowmaild API
+      version: 0.1.0
+      description: >
+        Served exclusively over a Unix domain socket — never a TCP/UDP
+        listener. Callers name a recipient alias; the daemon resolves the
+        address, builds the MIME message, and delivers over SMTP.
+    paths:
+      /v1/health:
+        get:
+          summary: Readiness check
+          responses:
+            "200":
+              description: Daemon is ready (config loaded, database reachable)
+            "503":
+              description: Daemon is not ready
+      /v1/send:
+        post:
+          summary: Send an email to an allowlisted recipient alias
+          requestBody:
+            required: true
+            content:
+              application/json:
+                schema:
+                  type: object
+                  additionalProperties: false
+                  required: [recipient, subject, text, idempotency_key]
+                  properties:
+                    recipient:
+                      type: string
+                      description: Configured recipient alias, never a raw address
+                    subject:
+                      type: string
+                    text:
+                      type: string
+                    idempotency_key:
+                      type: string
+          responses:
+            "200":
+              description: Request reached a terminal state (sent, failed, or ambiguous)
+              content:
+                application/json:
+                  schema:
+                    type: object
+                    properties:
+                      request_id: { type: string }
+                      status: { type: string, enum: [sent, failed, ambiguous] }
+                      recipient: { type: string }
+                      message_id: { type: string }
+                      result_code: { type: string }
+                      detail: { type: string }
+            "400":
+              description: Validation error (unknown property, malformed field, unknown alias)
+              content:
+                application/json:
+                  schema:
+                    type: object
+                    properties:
+                      error:
+                        type: object
+                        properties:
+                          code: { type: string }
+                          message: { type: string }
+                          valid_recipients:
+                            type: array
+                            items: { type: string }
