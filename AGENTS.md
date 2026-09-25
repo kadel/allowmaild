@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI coding agents when working with code in this repository.
 
 ## What this is
 
@@ -8,19 +8,19 @@ allowmaild is an email-sending daemon for semi-trusted local processes (e.g. an 
 
 ## Commands
 
-Go is not assumed to be on PATH — use nix (never brew):
+Go is not assumed to be on PATH — use mise (never brew):
 
 ```sh
-nix develop                          # dev shell with go, gopls, gotools
-nix run nixpkgs#go -- test ./...     # run all tests without entering the shell
-nix run nixpkgs#go -- test ./internal/server -run TestName   # single test
-nix build .#allowmaild               # release build (also runs the test suite)
-CGO_ENABLED=0 go build ./cmd/allowmaild   # plain build inside the dev shell
+mise install                         # installs the pinned Go toolchain (see mise.toml)
+mise run test                        # run all tests
+go test ./internal/server -run TestName   # single test (after `mise install`, or `mise exec -- go test ...`)
+mise run build                       # release build, stamped with VERSION via ldflags
+CGO_ENABLED=0 go build ./cmd/allowmaild   # plain build once the pinned Go is active
 ```
 
 - The build is pure Go (`CGO_ENABLED=0`); SQLite is `modernc.org/sqlite`, not mattn/go-sqlite3. Don't introduce cgo dependencies.
-- When `go.mod`/`go.sum` change, `vendorHash` in `flake.nix` must be updated or `nix build` fails (build once, copy the hash from the error).
-- Version comes from the `VERSION` file, stamped via ldflags; CI (`.github/workflows/release.yml`) builds Linux amd64/arm64 binaries with `nix build` on pushes to main and `v*` tags.
+- The Go toolchain version is pinned in `mise.toml`; bump it there when `go.mod`'s `go` directive changes.
+- Version comes from the `VERSION` file, stamped via ldflags; CI (`.github/workflows/release.yml`) builds Linux amd64/arm64 binaries with `mise run build` on pushes to main and `v*` tags.
 
 ## Architecture
 

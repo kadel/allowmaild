@@ -21,11 +21,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: jdx/mise-action@v2
 
-      # The flake reads VERSION and stamps it into the binary via ldflags.
+      # mise.toml reads VERSION and stamps it into the binary via ldflags.
       # Tag builds get the tag's version; main builds get <version>+<sha>.
-      # VERSION is a tracked file, so the (dirty) flake eval picks it up.
+      # VERSION is a tracked file, so the `mise run build` task picks it up.
       - name: Stamp version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
@@ -35,15 +35,17 @@ jobs:
           fi
           cat VERSION
 
-      # buildGoModule runs the Go test suite as part of the build.
-      - name: Build with nix
-        run: nix build .#allowmaild
+      - name: Test
+        run: mise run test
+
+      - name: Build
+        run: mise run build
 
       - name: Check stamped version
-        run: ./result/bin/allowmaild -version
+        run: ./allowmaild -version
 
       - name: Stage binary
-        run: install -m 0755 result/bin/allowmaild allowmaild-linux-${{ matrix.arch }}
+        run: install -m 0755 allowmaild allowmaild-linux-${{ matrix.arch }}
 
       - uses: actions/upload-artifact@v7
         with:
