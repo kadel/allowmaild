@@ -1,0 +1,16 @@
+[tools]
+go = "1.26.4"
+
+[tasks.build]
+description = "Build the allowmaild binary with the VERSION file stamped in"
+run = """
+version=$(tr -d '[:space:]' < VERSION)
+CGO_ENABLED=0 go build \
+  -ldflags "-s -w -X main.version=$version" \
+  -o allowmaild \
+  ./cmd/allowmaild
+"""
+
+[tasks.test]
+description = "Run the full test suite"
+run = "go test ./..."
