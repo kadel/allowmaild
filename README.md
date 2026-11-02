@@ -34,8 +34,9 @@ curl -s --unix-socket /run/allowmail/allowmail.sock \
 ## Build
 
 ```sh
-nix build .#allowmaild        # or: CGO_ENABLED=0 go build ./cmd/allowmaild
-go test ./...
+mise install                  # installs the pinned Go toolchain (see mise.toml)
+mise run build                # or: CGO_ENABLED=0 go build ./cmd/allowmaild
+mise run test                 # or: go test ./...
 ```
 
 Prebuilt Linux binaries (amd64/arm64) are published on the

@@ -54,8 +54,8 @@ install -o root -g root -m 0600 smtp_password /etc/allowmaild/smtp_password
 ## 3. Binary and unit
 
 ```sh
-# from a checkout: nix build .#allowmaild   (or: CGO_ENABLED=0 go build ./cmd/allowmaild)
-install -o root -g root -m 0755 result/bin/allowmaild /usr/local/bin/allowmaild
+# from a checkout: mise run build   (or: CGO_ENABLED=0 go build ./cmd/allowmaild)
+install -o root -g root -m 0755 allowmaild /usr/local/bin/allowmaild
 install -o root -g root -m 0644 allowmaild.service /etc/systemd/system/allowmaild.service
 systemctl daemon-reload
 systemctl enable --now allowmaild
