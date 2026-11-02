@@ -61,6 +61,36 @@ func TestValidConfigLoads(t *testing.T) {
 	}
 }
 
+func TestRequireApprovalDefaultsFalse(t *testing.T) {
+	cfg, _, err := Load(writeConfig(t, validConfig))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Recipients["self-gmail"].RequireApproval {
+		t.Error("require_approval absent should default to false")
+	}
+}
+
+func TestRequireApprovalParses(t *testing.T) {
+	content := strings.Replace(validConfig, "address: dest@example.test",
+		"address: dest@example.test\n    require_approval: true", 1)
+	cfg, _, err := Load(writeConfig(t, content))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Recipients["self-gmail"].RequireApproval {
+		t.Error("require_approval: true did not parse")
+	}
+}
+
+func TestUnknownRecipientFieldRejected(t *testing.T) {
+	content := strings.Replace(validConfig, "address: dest@example.test",
+		"address: dest@example.test\n    requires_approval: true", 1)
+	if _, _, err := Load(writeConfig(t, content)); err == nil {
+		t.Fatal("config with unknown recipient field loaded; want strict-parse failure")
+	}
+}
+
 func TestUnknownFieldRejected(t *testing.T) {
 	_, _, err := Load(writeConfig(t, validConfig+"\nunknown_thing: 1\n"))
 	if err == nil {

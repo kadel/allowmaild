@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -318,6 +319,94 @@ func TestPurgeRetention(t *testing.T) {
 	}
 	if _, err := s.Get(ctx, "new"); err != nil {
 		t.Fatalf("new row missing after purge: %v", err)
+	}
+}
+
+func TestApprovalAssertionPersisted(t *testing.T) {
+	s, _ := openTest(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	p := params("asserted", now)
+	p.Approved = true
+	mustReserve(t, s, p)
+	mustReserve(t, s, params("unasserted", now))
+
+	row, err := s.Get(ctx, "asserted")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !row.Approved {
+		t.Fatal("asserted row reads as unapproved")
+	}
+	row, err = s.Get(ctx, "unasserted")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if row.Approved {
+		t.Fatal("unasserted row reads as approved")
+	}
+}
+
+// preApprovalSchema is the requests table as created before the approved
+// column existed.
+const preApprovalSchema = `
+CREATE TABLE requests (
+	key          TEXT PRIMARY KEY,
+	request_id   TEXT NOT NULL,
+	alias        TEXT NOT NULL,
+	subject_hash TEXT NOT NULL,
+	body_hash    TEXT NOT NULL,
+	state        TEXT NOT NULL CHECK (state IN ('sending','sent','failed','ambiguous')),
+	created_at   INTEGER NOT NULL,
+	updated_at   INTEGER NOT NULL,
+	result_code  TEXT NOT NULL DEFAULT '',
+	message_id   TEXT NOT NULL DEFAULT ''
+);
+`
+
+func TestOldDatabaseMigratesOnOpen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	if _, err := db.Exec(preApprovalSchema); err != nil {
+		t.Fatalf("create old schema: %v", err)
+	}
+	now := time.Now().Unix()
+	if _, err := db.Exec(
+		`INSERT INTO requests (key, request_id, alias, subject_hash, body_hash, state, created_at, updated_at)
+		 VALUES ('old-key', 'req-old', 'self-gmail', 'sh', 'bh', 'sent', ?, ?)`, now, now); err != nil {
+		t.Fatalf("insert old row: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open on old database: %v", err)
+	}
+	defer s.Close()
+
+	row, err := s.Get(context.Background(), "old-key")
+	if err != nil {
+		t.Fatalf("Get migrated row: %v", err)
+	}
+	if row.Approved {
+		t.Fatal("pre-migration row reads as approved; want unasserted")
+	}
+
+	p := params("new-key", time.Now())
+	p.Approved = true
+	mustReserve(t, s, p)
+	row, err = s.Get(context.Background(), "new-key")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !row.Approved {
+		t.Fatal("assertion not persisted in migrated database")
 	}
 }
 

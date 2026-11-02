@@ -31,6 +31,62 @@ curl -s --unix-socket /run/allowmail/allowmail.sock \
 - **Fail-closed startup**: missing config, credential, or state directory
   means the daemon exits before the socket ever exists.
 
+## API
+
+- `GET /v1/health` — store liveness.
+- `GET /v1/recipients` — configured aliases and their `requires_approval`
+  flags, sorted by alias: `{"recipients":[{"alias":"dad","requires_approval":true},...]}`.
+  Never returns addresses or any other config value.
+- `POST /v1/send` — deliver to an alias. Body:
+  `recipient`, `subject`, `text`, `idempotency_key`, and optional `approved`.
+
+### Per-recipient approval
+
+A recipient can be flagged in the config:
+
+```yaml
+recipients:
+  dad:
+    address: dad@example.com
+    require_approval: true
+```
+
+Sends to a flagged alias must assert `"approved": true` or they are rejected
+with HTTP 403, code `approval_required`, before any rate-limit budget or
+idempotency key is consumed. The `approved` field never participates in
+idempotency content matching, and the audit log records whether each accepted
+request asserted approval. Unflagged recipients are unaffected; configs
+written before the flag existed behave identically.
+
+**Trust boundary:** the `approved` field is a tripwire, not enforcement. It
+makes an accidental bypass (a plugin bug, a naive caller) fail loudly and
+auditably, but any process that can reach the socket can assert
+`approved: true` itself. The human prompt lives in the OpenClaw plugin below;
+keep the agent's shell out of the socket group so the plugin is the only path
+to the daemon.
+
+## OpenClaw plugin
+
+[`openclaw-plugin/`](openclaw-plugin/) is a TypeScript OpenClaw plugin
+exposing a `send_email(recipient, subject, text)` tool backed by the daemon
+socket. Its `before_tool_call` hook queries `/v1/recipients` per call and, for
+flagged recipients, has the OpenClaw framework prompt the user
+(`allow-once`/`deny` only — persistent trust lives solely in the daemon
+config). Only an `allow-once` decision sets `approved: true` on the send;
+denials and timeouts never reach the daemon, and if recipient discovery fails
+the call is blocked.
+
+```sh
+cd openclaw-plugin
+npm install
+npm run plugin:build && npm run plugin:validate
+npm test
+```
+
+Install it into OpenClaw with `openclaw plugins install ./openclaw-plugin`,
+then set the socket path in the plugin config if it differs from the default
+`/run/allowmail/allowmail.sock`.
+
 ## Build
 
 ```sh

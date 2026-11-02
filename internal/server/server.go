@@ -47,8 +47,27 @@ func (s *Server) SetNow(now func() time.Time) { s.now = now }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", s.handleHealth)
+	mux.HandleFunc("GET /v1/recipients", s.handleRecipients)
 	mux.HandleFunc("POST /v1/send", s.handleSend)
 	return mux
+}
+
+// recipientEntry lists one configured alias. Aliases and approval flags only —
+// never addresses or other config values.
+type recipientEntry struct {
+	Alias            string `json:"alias"`
+	RequiresApproval bool   `json:"requires_approval"`
+}
+
+func (s *Server) handleRecipients(w http.ResponseWriter, r *http.Request) {
+	entries := make([]recipientEntry, 0, len(s.cfg.Recipients))
+	for _, alias := range s.cfg.AliasNames() {
+		entries = append(entries, recipientEntry{
+			Alias:            alias,
+			RequiresApproval: s.cfg.Recipients[alias].RequireApproval,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string][]recipientEntry{"recipients": entries})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -65,6 +84,10 @@ type sendRequest struct {
 	Subject        string `json:"subject"`
 	Text           string `json:"text"`
 	IdempotencyKey string `json:"idempotency_key"`
+	// Approved asserts that a human approved this message; required when the
+	// recipient is configured with require_approval. Not part of idempotency
+	// content matching.
+	Approved bool `json:"approved"`
 }
 
 type errorBody struct {
@@ -105,6 +128,15 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Approval is a pure precondition: rejected requests consume no rate-limit
+	// budget and no idempotency key, so this runs before Reserve.
+	if recipient.RequireApproval && !req.Approved {
+		s.log.Info("approval required", "alias", req.Recipient)
+		s.writeError(w, http.StatusForbidden, "approval_required",
+			"recipient requires per-message approval; the request must assert approved: true")
+		return
+	}
+
 	subjectHash := sha256hex(req.Subject)
 	bodyHash := sha256hex(req.Text)
 	requestID := newRequestID()
@@ -127,6 +159,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		BodyHash:    bodyHash,
 		Now:         now,
 		Limits:      limits,
+		Approved:    req.Approved,
 	})
 	if err != nil {
 		// Fail closed: if limits or duplicates cannot be evaluated, no send.

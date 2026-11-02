@@ -47,6 +47,8 @@
             go
             gopls
             gotools
+            # For the openclaw-plugin/ TypeScript subproject.
+            nodejs_24
           ];
         };
       });
