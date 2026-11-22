@@ -8,19 +8,17 @@ allowmaild is an email-sending daemon for semi-trusted local processes (e.g. an 
 
 ## Commands
 
-Go is not assumed to be on PATH — use nix (never brew):
+Go is managed by mise (see `mise.toml`) — never brew:
 
 ```sh
-nix develop                          # dev shell with go, gopls, gotools
-nix run nixpkgs#go -- test ./...     # run all tests without entering the shell
-nix run nixpkgs#go -- test ./internal/server -run TestName   # single test
-nix build .#allowmaild               # release build (also runs the test suite)
-CGO_ENABLED=0 go build ./cmd/allowmaild   # plain build inside the dev shell
+mise install                         # install go, gopls, goimports
+mise run test                        # run all tests
+go test ./internal/server -run TestName   # single test (after mise install / mise activate)
+mise run build                       # release build (stamps VERSION via ldflags)
 ```
 
-- The build is pure Go (`CGO_ENABLED=0`); SQLite is `modernc.org/sqlite`, not mattn/go-sqlite3. Don't introduce cgo dependencies.
-- When `go.mod`/`go.sum` change, `vendorHash` in `flake.nix` must be updated or `nix build` fails (build once, copy the hash from the error).
-- Version comes from the `VERSION` file, stamped via ldflags; CI (`.github/workflows/release.yml`) builds Linux amd64/arm64 binaries with `nix build` on pushes to main and `v*` tags.
+- The build is pure Go (`CGO_ENABLED=0` is set in `mise.toml`); SQLite is `modernc.org/sqlite`, not mattn/go-sqlite3. Don't introduce cgo dependencies.
+- Version comes from the `VERSION` file, stamped via ldflags; CI (`.github/workflows/release.yml`) builds Linux amd64/arm64 binaries with mise on pushes to main and `v*` tags.
 
 ## Architecture
 

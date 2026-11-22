@@ -21,11 +21,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: jdx/mise-action@v5
+        with:
+          # CI only needs the Go toolchain; skip gopls/goimports.
+          install_args: go
 
-      # The flake reads VERSION and stamps it into the binary via ldflags.
+      # Stamp VERSION into the binary via ldflags.
       # Tag builds get the tag's version; main builds get <version>+<sha>.
-      # VERSION is a tracked file, so the (dirty) flake eval picks it up.
       - name: Stamp version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
@@ -35,15 +37,17 @@ jobs:
           fi
           cat VERSION
 
-      # buildGoModule runs the Go test suite as part of the build.
-      - name: Build with nix
-        run: nix build .#allowmaild
+      - name: Test
+        run: mise run test
+
+      - name: Build
+        run: |
+          VERSION=$(tr -d '[:space:]' < VERSION)
+          go build -ldflags="-s -w -X main.version=${VERSION}" \
+            -o allowmaild-linux-${{ matrix.arch }} ./cmd/allowmaild
 
       - name: Check stamped version
-        run: ./result/bin/allowmaild -version
-
-      - name: Stage binary
-        run: install -m 0755 result/bin/allowmaild allowmaild-linux-${{ matrix.arch }}
+        run: ./allowmaild-linux-${{ matrix.arch }} -version
 
       - uses: actions/upload-artifact@v7
         with:

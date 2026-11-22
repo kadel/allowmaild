@@ -33,9 +33,12 @@ curl -s --unix-socket /run/allowmail/allowmail.sock \
 
 ## Build
 
+Requires [mise](https://mise.jdx.dev/). Then:
+
 ```sh
-nix build .#allowmaild        # or: CGO_ENABLED=0 go build ./cmd/allowmaild
-go test ./...
+mise install
+mise run test
+mise run build                # or: go build -ldflags="-s -w -X main.version=$(tr -d '[:space:]' < VERSION)" -o allowmaild ./cmd/allowmaild
 ```
 
 Prebuilt Linux binaries (amd64/arm64) are published on the

@@ -1,0 +1,21 @@
+[settings]
+lockfile = true
+
+[tools]
+go = "1.26.4"
+"go:golang.org/x/tools/gopls" = "0.24.0"
+"go:golang.org/x/tools/cmd/goimports" = "0.53.0"
+
+[env]
+CGO_ENABLED = "0"
+
+[tasks.test]
+description = "Run the Go test suite"
+run = "go test ./..."
+
+[tasks.build]
+description = "Build allowmaild with the VERSION file stamped via ldflags"
+run = """
+VERSION=$(tr -d '[:space:]' < VERSION)
+go build -ldflags="-s -w -X main.version=${VERSION}" -o allowmaild ./cmd/allowmaild
+"""
