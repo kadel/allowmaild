@@ -7,7 +7,6 @@ metadata:
   annotations:
     github.com/project-slug: kadel/allowmaild
     backstage.io/source-location: url:https://github.com/kadel/allowmaild
-    backstage.io/techdocs-ref: dir:.
   links:
     - url: https://github.com/kadel/allowmaild
       title: GitHub Repository
@@ -103,13 +102,37 @@ spec:
               content:
                 application/json:
                   schema:
-                    type: object
-                    properties:
-                      error:
-                        type: object
-                        properties:
-                          code: { type: string }
-                          message: { type: string }
-                          valid_recipients:
-                            type: array
-                            items: { type: string }
+                    $ref: '#/components/schemas/SendError'
+            "409":
+              description: The idempotency key was used with different content, or the original request is still in progress
+              content:
+                application/json:
+                  schema:
+                    $ref: '#/components/schemas/SendError'
+            "429":
+              description: A global or recipient rate limit was exceeded
+              content:
+                application/json:
+                  schema:
+                    $ref: '#/components/schemas/SendError'
+            "503":
+              description: The request store is unavailable and no email was sent
+              content:
+                application/json:
+                  schema:
+                    $ref: '#/components/schemas/SendError'
+    components:
+      schemas:
+        SendError:
+          type: object
+          required: [error]
+          properties:
+            error:
+              type: object
+              required: [code, message]
+              properties:
+                code: { type: string }
+                message: { type: string }
+                valid_recipients:
+                  type: array
+                  items: { type: string }
